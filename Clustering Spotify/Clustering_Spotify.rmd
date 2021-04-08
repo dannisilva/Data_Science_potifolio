@@ -1,0 +1,289 @@
+---
+title: "Top_Spotify_Clustering"
+author: "Daniele Carvalho"
+date: "4/2/2021"
+output: 
+  html_document: 
+    keep_md: true
+---
+
+# Libraries
+
+```{r Libraries, message=FALSE, warning=FALSE, error=FALSE}
+library(readxl)
+library(summarytools)
+#devtools::install_github("boxuancui/DataExplorer")
+library(DataExplorer)
+library(kableExtra)
+library(dplyr)
+library(reshape2)
+library(lubridate)
+library(tidyverse)
+#library(textshape)
+library(magrittr)
+library(ggplot2)
+library(factoextra)
+library(FactoMineR)
+library(cluster)
+library(clValid)
+library(ape)
+library(dendextend)
+library(clustertend)
+library(NbClust)
+library(ggiraphExtra)
+library(plotly)
+
+```
+
+# Load Data
+```{r readdata}
+
+setwd("/Users/danielesilva/Documents/Data Science Projects/Data_Science/Clustering Spotify")
+
+#load data
+#font: http://organizeyourmusic.playlistmachinery.com/
+#Variables:
+#Genre - the genre of the track
+#Year - the release year of the recording. Note that due to vagaries of releases, re-releases, re-issues and general madness, sometimes the release years are not what you'd expect.
+#Added - the earliest date you added the track to your collection.
+#Beats Per Minute (BPM) - The tempo of the song.
+#Energy - The energy of a song - the higher the value, the more energtic. song
+#Danceability - The higher the value, the easier it is to dance to this song.
+#Loudness (dB) - The higher the value, the louder the song.
+#Liveness - The higher the value, the more likely the song is a live recording.
+#Valence - The higher the value, the more positive mood for the song.
+#Length - The duration of the song.
+#Acousticness - The higher the value the more acoustic the song is.
+#Speechiness - The higher the value the more spoken word the song contains.
+#Popularity - The higher the value the more popular the song is.
+#Duration - The length of the song.
+
+data = read_xlsx("my_top20.xlsx")
+
+```
+
+# Exploratory Data
+
+```{r eda}
+
+head(data)
+summary(data) %>% kable() %>% kable_styling()
+#glimpse(data) %>% kable() %>% kable_styling()
+
+#st_options(plain.ascii = FALSE)
+
+print(dfSummary(data, graph.magnif = 0.75), method = 'render')
+
+#DataExplorer
+
+plot_str(data)
+
+plot_missing(data)
+
+plot_histogram(data)
+
+plot_correlation(data, type = 'continuous')
+
+#plot_bar(data) 
+
+#plot_boxplot(data) 
+
+```
+
+# Tratamento de Dados
+
+```{r prepare}
+
+names(data) = make.names(names(data))
+names(data)
+
+#remove duplicates
+data_numeric = data %>%
+        unique() %>%
+#transform lenght
+        mutate(DURATION = ms(format(as.POSIXct(strptime(LENGTH, "%Y-%m-%d %H:%M:%S",tz="")), format= "%H:%M")))%>%
+#keep just numeric variables
+        select(-N,-TITLE,-ARTIST,-RELEASE,-RND,-POP.,-LENGTH) 
+#create y for vtreat
+#        mutate(y = rowSums(across(where(is.numeric))))
+
+str(data_numeric)
+
+#scale data
+data_scale = as.data.frame(scale(data_numeric))
+
+ggplot(stack(data_scale), aes(x=ind, y=values)) + geom_boxplot(aes(fill=ind))
+
+#outliers in energy and loud
+
+#Title to rownames
+
+rownames(data_scale) = data$TITLE
+
+
+
+```
+
+# Choose the optimal number of cluster
+
+```{r number_clusters}
+
+set.seed(1990)
+
+#os dados são clusterizaveis?
+hopkins(data_scale, n = nrow(data_scale)-1)
+
+res.pca <- PCA(data_scale,  graph = FALSE)
+# Visualize
+fviz_screeplot(res.pca, addlabels = TRUE, ylim = c(0, 50))
+
+# results for variables
+var <- get_pca_var(res.pca)
+# Contributions of variables to PC1
+fviz_contrib(res.pca, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca, choice = "var", axes = 2, top = 10)
+# Control variable colors using their contributions to the principle axis
+fviz_pca_var(res.pca, col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE # Avoid text overlapping
+             ) + theme_minimal() + ggtitle("Variables - PCA")
+
+
+# 1 - Elbow
+
+fviz_nbclust(data_scale, kmeans, method = "wss", k.max = 24) + theme_minimal() + ggtitle("the Elbow Method")
+
+# 2 - Gap
+
+gap_stat <- clusGap(data_scale, FUN = kmeans, nstart = 30, K.max = 24, B = 50)
+fviz_gap_stat(gap_stat) + theme_minimal() + ggtitle("fviz_gap_stat: Gap Statistic")
+
+# 3 - Silhouette
+
+fviz_nbclust(data_scale, kmeans, method = "silhouette", k.max = 24) + theme_minimal() + ggtitle("The Silhouette Plot")
+
+# 4 - Sum of Squares 
+
+#The above example would group the data into two clusters, centers = 2, and attempt #multiple initial configurations, reporting on the best one. For example, as this #algorithm is sensitive to the initial positions of the cluster centroids adding nstart #= 30 will generate 30 initial configurations and then average all the centroid #results.
+
+km2 <- kmeans(data_scale, 2, nstart = 30)
+km3 <- kmeans(data_scale, 3, nstart = 30)
+km4 <- kmeans(data_scale, 4)
+km5 <- kmeans(data_scale, 5)
+km6 <- kmeans(data_scale, 6)
+km7 <- kmeans(data_scale, 7)
+km8 <- kmeans(data_scale, 8)
+km9 <- kmeans(data_scale, 9)
+km10 <- kmeans(data_scale, 10)
+
+ssc <- data.frame(
+  kmeans = c(2,3,4,5,6,7,8,9,10),
+  within_ss = c(mean(km2$withinss), mean(km3$withinss), mean(km4$withinss), mean(km5$withinss), mean(km6$withinss), mean(km7$withinss), mean(km8$withinss), mean(km9$withinss), mean(km10$withinss)),
+  between_ss = c(km2$betweenss, km3$betweenss, km4$betweenss, km5$betweenss, km6$betweenss, km7$betweenss, km8$betweenss, km9$betweenss, km10$betweenss)
+)
+
+ssc %<>% gather(., key = "measurement", value = value, -kmeans)
+
+
+ssc %>% ggplot(., aes(x=kmeans, y=log10(value), fill = measurement)) + geom_bar(stat = "identity", position = "dodge") + ggtitle("Cluster Model Comparison") + xlab("Number of Clusters") + ylab("Log10 Total Sum of Squares") + scale_x_discrete(name = "Number of Clusters", limits = c("0", "2", "3", "4", "5", "6", "7", "8", "9", "10"))
+
+# 5 - NbClust 
+
+res.nbclust <- NbClust(data_scale, distance = "euclidean",
+                  min.nc = 2, max.nc = 9, 
+                  method = "complete", index ="all")
+factoextra::fviz_nbclust(res.nbclust) + theme_minimal() + ggtitle("NbClust's optimal number of clusters")
+
+```
+
+# Clustering
+
+```{r clustering}
+
+intern <- clValid(data_scale, nClust = 2:24, 
+              clMethods = c("hierarchical","kmeans","pam","clara"), validation = "internal")
+# Summary
+summary(intern) %>% kable() %>% kable_styling()
+
+# Dendogram
+d <- dist(data_scale, method = "euclidean")
+res.hc <- hclust(d, method = "ward.D2" )
+# Cut tree into 6 groups
+grp <- cutree(res.hc, k = 6)
+# Visualize
+#plot(res.hc, cex = 0.5) # plot tree
+
+# Color labels by specifying the number of cluster (k)
+colors = RColorBrewer::brewer.pal(6,"Set2")
+
+dend = as.dendrogram(res.hc)
+labels_cex(dend) = 0.5
+dend %>% set("labels_col", value = colors, k=6) %>% 
+          plot(main = "Color labels \nper cluster", cex = 1)
+
+
+plot(as.phylo(res.hc), type = "fan", tip.color = colors[grp],
+     label.offset = 1, cex = 0.5)
+
+#clara
+
+# Execution of k-means with k=5
+clara_clust <- clara(data_scale, 6, samples = 100)
+fviz_cluster(clara_clust, data = data_scale, ellipse.type = "norm", geom = "text", 
+             labelsize = 8, palette = colors, show.clust.cent = T) + theme_minimal() +
+        ggtitle("k = 6")
+
+```
+
+# Resultados
+
+```{r results}
+
+data_clusters = as.data.frame(data) %>% 
+        mutate(Cluster = as.factor(grp)) %>% 
+        mutate(DURATION = ms(format(as.POSIXct(strptime(LENGTH, "%Y-%m-%d %H:%M:%S",tz="")), format= "%H:%M")))
+        
+aggregate(data = data_clusters[,c(5:11,14:15)], . ~ Cluster, mean) %>% kable() %>% kable_styling()
+
+data_df <- as.data.frame(data_scale) %>% rownames_to_column()
+cluster_pos <- as.data.frame(grp) %>% rownames_to_column()
+
+colnames(cluster_pos) <- c("rowname", "cluster")
+
+data_scale_cl <- inner_join(cluster_pos, data_df)
+
+
+ggRadar(data_scale_cl[-1], aes(group = cluster), rescale = FALSE, 
+        legend.position = "none", size = 1, interactive = FALSE, use.label = TRUE) +
+        facet_wrap(~cluster) + scale_y_discrete(breaks = NULL) + # don't show ticks
+        theme(axis.text.x = element_text(size = 10)) + 
+        scale_fill_manual(values = rep(colors, nrow(data_scale_cl))) +
+        scale_color_manual(values = rep(colors, nrow(data_scale_cl))) +
+        ggtitle("Music Attributes per Cluster")
+
+#arrange data for plots
+
+data_plot = melt(data_clusters, id.vars = c("N","Cluster"), 
+                 measure.vars = c("BPM", "ENERGY", "DANCE",  "LOUD", "VALENCE",
+                                  "ACOUSTIC"),
+                 variable.name = "VAR",
+                 value.name = "Value") 
+
+p_ALL=  ggplot(data = data_plot, aes(x=Value, fill=Cluster)) +
+        geom_density(alpha=0.5) + 
+        scale_fill_brewer(palette = "Set2") +
+        facet_wrap(. ~ VAR, scales = "free")
+        
+
+subplot(ggplotly(p_ALL))
+
+```
+
+# References
+
+[https://towardsdatascience.com/10-tips-for-choosing-the-optimal-number-of-clusters](https://towardsdatascience.com/10-tips-for-choosing-the-optimal-number-of-clusters-277e93d72d92)
+
+[http://www.sthda.com/english/wiki/beautiful-dendrogram-visualizations-in-r-5-must-known-methods-unsupervised-machine-learning](http://www.sthda.com/english/wiki/beautiful-dendrogram-visualizations-in-r-5-must-known-methods-unsupervised-machine-learning)
+
+[http://www.sthda.com/english/wiki/wiki.php?id_contents=7930](http://www.sthda.com/english/wiki/wiki.php?id_contents=7930)
